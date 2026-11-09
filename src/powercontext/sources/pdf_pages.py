@@ -18,15 +18,16 @@ from __future__ import annotations
 
 import hashlib
 import io
+import math
 import re
+from collections import Counter, defaultdict
 from dataclasses import dataclass
-from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field
 from pypdf import PdfReader
 
 from powercontext.builtin.artifacts.memory.models import MemoryCitation
-from powercontext.builtin.runtime.models import SearchMemoryRequest
+from powercontext.builtin.runtime.models import GetMemoryEntryRequest, SearchMemoryRequest
 from powercontext.limits import MAX_SOURCE_ID_LENGTH
 from powercontext.sources.models import Source, SourceMaterialization
 from powercontext.sources.projections import TextEvidence
@@ -71,7 +72,7 @@ def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
         raise ValueError("PDF content must not be empty")
     digest = hashlib.sha256(value.content).hexdigest()
     try:
-        reader = PdfReader(io.BytesIO(value.content), strict=True)
+        reader = PdfReader(io.BytesIO(value.content), strict=False)
         if reader.is_encrypted and not reader.decrypt(""):
             raise ValueError("PDF requires a password")
         texts = tuple(page.extract_text() or "" for page in reader.pages)
@@ -88,7 +89,8 @@ def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
 
 
 def _source_id(value: PDFPageInput) -> str:
-    source_id = f"pdf:{quote(value.document_id, safe='')}:{value.document_sha256}:{value.page_number}"
+    document_key = hashlib.sha256(value.document_id.encode("utf-8")).hexdigest()
+    source_id = f"pdf:{document_key}:{value.document_sha256}:{value.page_number}"
     if len(source_id) > MAX_SOURCE_ID_LENGTH:
         raise ValueError(f"PDF page source_id must not exceed {MAX_SOURCE_ID_LENGTH} characters")
     return source_id
@@ -149,13 +151,149 @@ _STOPWORDS = frozenset(
     "a an and are as at be by did do does for from has have how if in into is it of on or that the then to was were what when where which who why with".split()
 )
 _FINANCIAL_EXPANSIONS = {
-    "ebitda": ("operating income", "depreciation amortization", "cash flows"),
+    "ebitda": ("consolidated statement of income", "operating income", "depreciation amortization", "cash flows"),
     "capex": ("capital expenditures", "capital spending"),
     "restructuring": ("restructuring impairment charges",),
     "legal": ("legal proceedings", "litigation"),
-    "geographies": ("geographic divisions", "international operations"),
-    "margin": ("net revenue", "operating profit"),
+    "geographies": ("divisions", "geographic divisions", "international operations"),
+    "margin": ("consolidated statement of income", "net revenue", "operating profit"),
+    "debt": ("long term debt", "short term borrowings", "total debt"),
+    "revenue": ("net revenue", "net sales"),
+    "sales": ("net sales", "revenue"),
+    "inventory": ("inventories", "cost of sales"),
+    "tax": ("income taxes", "effective tax rate"),
+    "liquidity": ("cash and cash equivalents", "credit facilities"),
+    "acquisition": ("business acquisitions", "purchase consideration"),
+    "dividend": ("dividends declared", "dividends paid"),
+    "employees": ("employees", "workforce"),
+    "cash": ("cash flows", "cash and cash equivalents"),
 }
+
+
+def _retrieval_queries(question: str) -> tuple[str, ...]:
+    terms = [term for term in re.findall(r"[a-z]+|\d+", question.casefold()) if term not in _STOPWORDS]
+    unique = tuple(dict.fromkeys(terms))
+    queries: list[str] = [question]
+    if unique:
+        queries.append(" ".join(unique))
+    queries.extend(" ".join(unique[index : index + size]) for size in (4, 3, 2) for index in range(len(unique) - size + 1))
+    queries.extend(unique)
+    queries.extend(phrase for term in unique for phrase in _FINANCIAL_EXPANSIONS.get(term, ()))
+    return tuple(query for query in dict.fromkeys(queries) if query.strip())
+
+
+def _rank_candidates(question: str, ranked_hits: list[tuple[int, int, object]]) -> list[object]:
+    by_identity: dict[tuple[str, int, str, str], object] = {}
+    ranks: defaultdict[tuple[str, int, str, str], float] = defaultdict(float)
+    for query_index, rank, hit in ranked_hits:
+        key = (hit.memory_ref.artifact_id, hit.memory_ref.revision, hit.entry_id, hit.entry_version_id)
+        by_identity[key] = hit
+        ranks[key] += 1.0 / (8.0 + rank) + (0.08 if query_index == 0 else 0.0)
+
+    question_terms = set(re.findall(r"[a-z]+|\d+", question.casefold())) - _STOPWORDS
+    phrases = {
+        phrase
+        for term in question_terms
+        for phrase in _FINANCIAL_EXPANSIONS.get(term, ())
+    }
+    normalized_question = " ".join(re.findall(r"[a-z]+|\d+", question.casefold()))
+    phrases.update(
+        phrase
+        for phrase in (
+            "statement of income",
+            "income statement",
+            "statement of cash flows",
+            "cash flow statement",
+            "legal proceedings",
+            "depreciation and amortization",
+            "operating income",
+        )
+        if phrase in normalized_question
+    )
+    documents = {key: Counter(re.findall(r"[a-z]+|\d+", hit.text.casefold())) for key, hit in by_identity.items()}
+    frequencies = Counter(term for terms in documents.values() for term in question_terms if terms[term])
+    total = max(len(documents), 1)
+
+    def score(key):
+        terms = documents[key]
+        normalized_text = " ".join(re.findall(r"[a-z]+|\d+", by_identity[key].text.casefold()))
+        lexical = sum(
+            (1.0 + math.log1p(terms[term])) * math.log1p(total / (1 + frequencies[term]))
+            for term in question_terms
+            if terms[term]
+        )
+        coverage = len(question_terms.intersection(terms)) / max(len(question_terms), 1)
+        phrase_score = sum(24.0 + 2.0 * len(phrase.split()) for phrase in phrases if phrase in normalized_text)
+        return lexical + 3.0 * coverage + phrase_score + 5.0 * ranks[key]
+
+    return [by_identity[key] for key in sorted(by_identity, key=lambda key: (-score(key), key))]
+
+
+async def _select_with_page_neighbors(memory, ranked: list[object], limit: int) -> list[object]:
+    pool = ranked[: max(80, limit * 8)]
+    locations: dict[tuple[str, int], object] = {}
+    hit_locations: dict[tuple[str, int, str, str], tuple[str, int]] = {}
+    for hit in pool:
+        citation = MemoryCitation(
+            memory_ref=hit.memory_ref,
+            entry_id=hit.entry_id,
+            entry_version_id=hit.entry_version_id,
+        )
+        entry = (await memory.get(GetMemoryEntryRequest(citation=citation))).entry
+        if len(entry.sources) != 1:
+            continue
+        source_id = entry.sources[0].source_id
+        prefix, separator, page = source_id.rpartition(":")
+        if not separator or not page.isdigit():
+            continue
+        location = (prefix, int(page))
+        locations[location] = hit
+        hit_locations[(hit.memory_ref.artifact_id, hit.memory_ref.revision, hit.entry_id, hit.entry_version_id)] = location
+
+    neighbor_budget = min(6, limit // 3)
+    selected = list(ranked[: limit - neighbor_budget])
+    selected_ids = {
+        (hit.memory_ref.artifact_id, hit.memory_ref.revision, hit.entry_id, hit.entry_version_id) for hit in selected
+    }
+    anchor_locations = {
+        location
+        for anchor in selected
+        for identity in (
+            (anchor.memory_ref.artifact_id, anchor.memory_ref.revision, anchor.entry_id, anchor.entry_version_id),
+        )
+        if (location := hit_locations.get(identity)) is not None
+    }
+    neighbors = []
+    for rank, hit in enumerate(pool):
+        identity = (hit.memory_ref.artifact_id, hit.memory_ref.revision, hit.entry_id, hit.entry_version_id)
+        location = hit_locations.get(identity)
+        if location is None or identity in selected_ids:
+            continue
+        distance = min(
+            (abs(location[1] - anchor[1]) for anchor in anchor_locations if anchor[0] == location[0]),
+            default=999,
+        )
+        if distance <= 2:
+            neighbors.append((rank + 8 * distance, rank, hit))
+    for _priority, _rank, neighbor in sorted(neighbors, key=lambda item: (item[0], item[1]))[:neighbor_budget]:
+        neighbor_id = (
+            neighbor.memory_ref.artifact_id,
+            neighbor.memory_ref.revision,
+            neighbor.entry_id,
+            neighbor.entry_version_id,
+        )
+        selected.append(neighbor)
+        selected_ids.add(neighbor_id)
+        if len(selected) == limit:
+            return selected
+    for hit in ranked:
+        identity = (hit.memory_ref.artifact_id, hit.memory_ref.revision, hit.entry_id, hit.entry_version_id)
+        if identity not in selected_ids:
+            selected.append(hit)
+            selected_ids.add(identity)
+            if len(selected) == limit:
+                break
+    return selected
 
 
 async def search_pdf_pages(memory, question: str, limit: int = 10) -> tuple[MemoryCitation, ...]:
@@ -165,38 +303,35 @@ async def search_pdf_pages(memory, question: str, limit: int = 10) -> tuple[Memo
         raise ValueError("limit must be positive")
     if not isinstance(question, str) or not question.strip():
         raise ValueError("question must be non-empty")
-    terms = [term for term in re.findall(r"[a-z]+|\d+", question.lower()) if term not in _STOPWORDS]
-    queries = [question]
-    if terms:
-        queries.append(" ".join(dict.fromkeys(terms)))
-    expansions = [phrase for term in terms for phrase in _FINANCIAL_EXPANSIONS.get(term, ())]
-    queries.extend(expansions)
-
-    pages = []
-    for query in dict.fromkeys(queries):
-        pages.append(await memory.search(SearchMemoryRequest(query=query, mode="fts", limit=max(limit, 20))))
+    queries = _retrieval_queries(question)
+    terms = set(re.findall(r"[a-z]+|\d+", question.casefold())) - _STOPWORDS
+    expansions = {phrase for term in terms for phrase in _FINANCIAL_EXPANSIONS.get(term, ())}
+    ranked_hits: list[tuple[int, int, object]] = []
+    expansion_anchors = []
+    for query_index, query in enumerate(queries):
+        page = await memory.search(SearchMemoryRequest(query=query, mode="fts", limit=max(limit, 30)))
+        ranked_hits.extend((query_index, rank, hit) for rank, hit in enumerate(page.hits, start=1))
+        if query in expansions and page.hits:
+            expansion_anchors.append(page.hits[0])
 
     citations: list[MemoryCitation] = []
-    seen: set[tuple[str, int, str, str]] = set()
-    max_hits = max((len(page.hits) for page in pages), default=0)
-    for index in range(max_hits):
-        for page in pages:
-            if index >= len(page.hits):
-                continue
-            hit = page.hits[index]
-            key = (hit.memory_ref.artifact_id, hit.memory_ref.revision, hit.entry_id, hit.entry_version_id)
-            if key in seen:
-                continue
-            seen.add(key)
-            citations.append(
-                MemoryCitation(
-                    memory_ref=hit.memory_ref,
-                    entry_id=hit.entry_id,
-                    entry_version_id=hit.entry_version_id,
-                )
+    ranked = _rank_candidates(question, ranked_hits)
+    anchored = []
+    anchored_ids = set()
+    for hit in (*expansion_anchors, *ranked):
+        identity = (hit.memory_ref.artifact_id, hit.memory_ref.revision, hit.entry_id, hit.entry_version_id)
+        if identity not in anchored_ids:
+            anchored.append(hit)
+            anchored_ids.add(identity)
+    ranked = anchored
+    for hit in await _select_with_page_neighbors(memory, ranked, limit):
+        citations.append(
+            MemoryCitation(
+                memory_ref=hit.memory_ref,
+                entry_id=hit.entry_id,
+                entry_version_id=hit.entry_version_id,
             )
-            if len(citations) == limit:
-                return tuple(citations)
+        )
     return tuple(citations)
 
 
