@@ -99,6 +99,12 @@ class ArtifactProcessingPendingProvider(Protocol):
         """Return the next keyset position, or None when this pass is complete."""
         ...
 
+    async def request_count_eligible(
+        self, after_scope_id: str | None, limit: int, *, fence: ArtifactProcessingFence
+    ) -> str | None:
+        """Persist requests whose unconsumed Source count reaches the configured threshold."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class ArtifactProcessingBinding:
@@ -397,6 +403,7 @@ class _FamilyState:
     scan_in_progress: bool = False
     reconcile_after: str | None = None
     reconcile_complete: bool = False
+    count_after: str | None = None
     notification_at_start: int = 0
     discovery_pending: bool = True
     next_schedule_at: float | None = None
@@ -648,6 +655,12 @@ class ArtifactProcessingSupervisor:
                 state.next_discovery_at = loop.time() + _DISCOVERY_PAGE_DELAY_SECONDS
         else:
             state.reconcile_complete = True
+        if binding.pending_provider is not None:
+            state.count_after = await binding.pending_provider.request_count_eligible(
+                state.count_after, _DISCOVERY_PAGE_SIZE, fence=self._require_current_fence()
+            )
+            if state.count_after is not None:
+                state.next_discovery_at = loop.time() + _DISCOVERY_PAGE_DELAY_SECONDS
         # Alternate discovery channels so explicit traffic cannot monopolize admission.
         state.automatic_next = not state.automatic_next
         if state.automatic_next:

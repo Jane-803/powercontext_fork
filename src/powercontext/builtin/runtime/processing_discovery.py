@@ -48,10 +48,17 @@ async def enabled_profile_scopes(connection: AsyncConnection, scope_ids: tuple[s
 class SourceProcessingPendingProvider:
     """Inspect journal metadata, never Source bodies, prompts, or models."""
 
-    def __init__(self, database: AsyncDatabase, binding_name: str, artifact_family: str) -> None:
+    def __init__(
+        self,
+        database: AsyncDatabase,
+        binding_name: str,
+        artifact_family: str,
+        count_threshold: int | None = None,
+    ) -> None:
         self._database = database
         self._binding = binding_name
         self._family = artifact_family
+        self._count_threshold = count_threshold
 
     async def reconcile(self, after_scope_id: str | None, limit: int, *, fence: ArtifactProcessingFence) -> str | None:
         heads = SOURCE_JOURNAL_HEADS_TABLE
@@ -73,4 +80,28 @@ class SourceProcessingPendingProvider:
                 intent = await intents.load(connection, scope, self._binding, for_update=True)
                 if intent is None or intent.dirty_generation == intent.clean_generation:
                     await intents.mark_dirty(connection, scope, self._binding)
+        return str(rows[-1][0]) if len(rows) == limit else None
+
+    async def request_count_eligible(
+        self, after_scope_id: str | None, limit: int, *, fence: ArtifactProcessingFence
+    ) -> str | None:
+        if self._count_threshold is None:
+            return None
+        heads = SOURCE_JOURNAL_HEADS_TABLE
+        statement = select(heads.c.scope_id, heads.c.position).order_by(heads.c.scope_id).limit(limit)
+        if after_scope_id is not None:
+            statement = statement.where(heads.c.scope_id > after_scope_id)
+        async with self._database.transaction() as connection:
+            await ArtifactProcessingLeaseRepository().require_fence(connection, fence)
+            rows = (await connection.execute(statement)).all()
+            intents = ArtifactProcessingIntentRepository()
+            cursors = SourceCursorRepository()
+            for scope, high in rows:
+                cursor = await cursors.load(connection, scope, self._binding)
+                position = 0 if cursor is None else cursor.cursor.sequence
+                if int(high) - position < self._count_threshold:
+                    continue
+                intent = await intents.load(connection, scope, self._binding, for_update=True)
+                if intent is not None and intent.requested_generation == intent.handled_generation:
+                    await intents.request(connection, scope, self._binding)
         return str(rows[-1][0]) if len(rows) == limit else None

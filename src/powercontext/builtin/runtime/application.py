@@ -249,6 +249,7 @@ from powercontext.builtin.runtime.recall_sufficiency import (
     recall_effort,
 )
 from powercontext.builtin.runtime.statistics import RelationalScopedStatistics, overview_selection
+from powercontext.builtin.runtime.source_lifecycle import SourceLifecycleApplication
 from powercontext.builtin.scope import ScopeApplication, ScopeDescriptor, ScopeSelection
 from powercontext.builtin.scope.subject_sources import SubjectSourceService
 from powercontext.builtin.sources import (
@@ -488,10 +489,13 @@ class ScopedSourceApplication:
                             span.set_attributes({_MEMORY_CAPTURE_SOURCE_COUNT: 1})
             except BaseValueConflictError as error:
                 raise SourceConflictError("identity", error.identity) from None
-            return SourceReceipt(
+            receipt = SourceReceipt(
                 source_ref=SourceRef(source_type=record.source_type, source_id=record.source_id),
                 sequence=record.position,
             )
+            if self._runtime.artifact_processing_supervisor is not None:
+                self._runtime.artifact_processing_supervisor.wake()
+            return receipt
         async with self._runtime._context(self.scope_id) as context:
             with self._runtime._stage(_MEMORY_CAPTURE_STAGE, attributes={}) as span:
                 source, sequence = await context.sources.capture(
@@ -504,7 +508,10 @@ class ScopedSourceApplication:
                 )
                 if span is not None:
                     span.set_attributes({_MEMORY_CAPTURE_SOURCE_COUNT: 1})
-            return SourceReceipt(source_ref=context.sources.catalog.as_ref(source), sequence=sequence)
+            receipt = SourceReceipt(source_ref=context.sources.catalog.as_ref(source), sequence=sequence)
+        if self._runtime.artifact_processing_supervisor is not None:
+            self._runtime.artifact_processing_supervisor.wake()
+        return receipt
 
 
 class SourceApplication:
@@ -531,11 +538,14 @@ class ScopedRecordApplication:
         /,
     ) -> SourceRecord:
         async with self._runtime._scope_operation(self.scope_id), self._runtime._locked(self.scope_id):
-            return await self._runtime._records().create_source(
+            created = await self._runtime._records().create_source(
                 self.scope_id,
                 source_type,
                 content,
             )
+        if self._runtime.artifact_processing_supervisor is not None:
+            self._runtime.artifact_processing_supervisor.wake()
+        return created
 
     async def get_source(self, source_type: str, source_id: str, /) -> SourceRecord:
         async with self._runtime._scope_operation(self.scope_id):
@@ -563,7 +573,10 @@ class ScopedRecordApplication:
         /,
     ) -> ArtifactCreated:
         async with self._runtime._scope_operation(self.scope_id), self._runtime._locked(self.scope_id):
-            return await self._runtime._records().create_artifact(self.scope_id, family, write)
+            created = await self._runtime._records().create_artifact(self.scope_id, family, write)
+        if self._runtime.artifact_processing_supervisor is not None:
+            self._runtime.artifact_processing_supervisor.wake()
+        return created
 
     async def get_artifact(self, family: str, artifact_id: str, /) -> ArtifactRecord:
         async with self._runtime._scope_operation(self.scope_id):
@@ -846,6 +859,25 @@ class ScopedContextApplication:
             if authorize_scopes is not None:
                 await authorize_scopes((self.scope_id, *scope.context_references))
             return await self._prepare(request, scope)
+
+    async def prepare_incremental(
+        self,
+        request: PrepareContextRequest,
+        /,
+        *,
+        base_pack=None,
+    ):
+        """Prepare a portable full pack or a delta against a caller-owned base."""
+
+        from powercontext.builtin.runtime.context_pack import ContextPack, ContextPackDelta
+
+        prepared = await self.prepare(request)
+        target = ContextPack.from_content(prepared.content or "")
+        if base_pack is None:
+            return target
+        if not isinstance(base_pack, ContextPack):
+            raise TypeError("base_pack must be a ContextPack")
+        return ContextPackDelta.between(base_pack, target)
 
     async def _prepare(self, request: PrepareContextRequest, scope: ScopeDescriptor, /) -> PreparedContext:
         build, effort = await self._prepare_build(request, scope)
@@ -2514,6 +2546,28 @@ class ScopedMemoryApplication:
             _validate_memory_identity(context.artifacts.memory_artifact_id, memory)
             return _entry_record(memory, await _cited_entry(service, memory, citation))
 
+    async def get_from_lifecycle(self, citation: MemoryCitation) -> MemoryEntryRecord:
+        return await self.get(GetMemoryEntryRequest(citation=citation))
+
+    async def set_lifecycle_state(self, citation: MemoryCitation, available: bool) -> None:
+        async with self._runtime._context(
+            self.scope_id, embedding_purpose=ModelUsagePurpose.MEMORY_INDEXING
+        ) as context, self._runtime._locked(self.scope_id):
+            service = context.artifacts.memory
+            current = await service.head(context.artifacts.memory_artifact_id)
+            entries = await service.entries(current)
+            entry = next((item for item in entries if item.entry_id == citation.entry_id), None)
+            if entry is None:
+                raise ArtifactNotFoundError(citation)
+            manifest = next(item for item in current.content.manifest.entries if item.entry_id == citation.entry_id)
+            target = "active" if available else "inactive"
+            if manifest.state == target:
+                return
+            if available:
+                await service.reactivate(current, entries=(entry,), reason="Source lifecycle restored")
+            else:
+                await service.forget(current, entries=(entry,), reason="Source lifecycle withdrawn")
+
     async def revise(self, request: ReviseMemoryEntryRequest, /) -> MemoryMutationResult:
         async with self._runtime._context(
             self.scope_id,
@@ -2683,7 +2737,7 @@ class ScopedTopicMemoryApplication:
                         "unit": "topic-memory",
                     },
                 )
-        return result
+        return await self._runtime.lifecycle.filter_topic_result(self.scope_id, result)
 
     async def _search_with_embedding(
         self,
@@ -3027,6 +3081,7 @@ class BuiltinRuntime:
         remote_ingestion: RemoteIngestion | None = None,
         dream_service: DreamService | None = None,
         generation_concurrency: int = 4,
+        lifecycle_database: AsyncDatabase | None = None,
     ) -> None:
         if source_window_limit < 1:
             raise _RuntimeConfigurationError("source_window_limit")
@@ -3110,6 +3165,9 @@ class BuiltinRuntime:
         self.work = WorkApplication(self)
         self.memory = MemoryApplication(self)
         self.topic_memory = TopicMemoryApplication(self)
+        if lifecycle_database is None:
+            raise _RuntimeConfigurationError("lifecycle_database")
+        self.lifecycle = SourceLifecycleApplication(self, lifecycle_database)
         self.records = RecordApplication(self)
         self.prompts = PromptApplication(self)
         self.review = ReviewApplication(self)

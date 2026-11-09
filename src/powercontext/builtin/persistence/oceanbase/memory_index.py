@@ -42,7 +42,7 @@ from powercontext.builtin.artifacts.memory import (
     MemorySearchRequest,
 )
 from powercontext.builtin.artifacts.memory.canonical import embedding_content_hash, validate_embedding
-from powercontext.builtin.persistence.memory_index import memory_channel_hits
+from powercontext.builtin.persistence.memory_index import CompositeMemoryIndex, memory_channel_hits
 from powercontext.builtin.persistence.tables import (
     ARTIFACT_HEADS_TABLE,
     MAX_MEMORY_ENTRY_ID_LENGTH,
@@ -504,3 +504,82 @@ def _embedding_hash(profile: EmbeddingProfile, entry_hash: str) -> str:
         normalization=profile.normalization,
         entry_content_hash=entry_hash,
     )
+
+
+class SeekDBHybridMemoryIndex(CompositeMemoryIndex):
+    """Use one native seekdb statement for the two hybrid candidate channels."""
+
+    def __init__(self, fts: OceanBaseMemoryFTSIndex, vector: OceanBaseMemoryVectorIndex) -> None:
+        super().__init__(fts, vector)
+        self._vector = vector
+        base_filter = """
+          AND h.scope_id = :scope_id
+          AND h.memory_artifact_id IN :memory_artifact_ids
+        """
+        sql = f"""
+        (SELECT 'fts' AS channel, h.memory_artifact_id, h.head_revision, h.entry_id,
+                h.entry_version_id, v.text, NULL AS distance
+         FROM pc_memory_entry_heads AS h
+         JOIN pc_memory_entry_versions AS v
+           ON v.scope_id=h.scope_id AND v.memory_artifact_id=h.memory_artifact_id
+          AND v.entry_version_id=h.entry_version_id
+         WHERE MATCH(h.searchable_text) AGAINST(:analyzed_query IN NATURAL LANGUAGE MODE)
+           {base_filter}
+         ORDER BY MATCH(h.searchable_text) AGAINST(:analyzed_query IN NATURAL LANGUAGE MODE) DESC,
+                  h.memory_artifact_id, h.entry_id, h.entry_version_id
+         LIMIT :candidate_limit)
+        UNION ALL
+        (SELECT 'vector' AS channel, h.memory_artifact_id, h.head_revision, h.entry_id,
+                h.entry_version_id, v.text, l2_distance(m.embedding, :query_vector) AS distance
+         FROM pc_memory_vector_entries AS m
+         JOIN pc_memory_entry_heads AS h
+           ON h.scope_id=m.scope_id AND h.memory_artifact_id=m.memory_artifact_id
+          AND h.entry_id=m.entry_id AND h.entry_version_id=m.entry_version_id
+         JOIN pc_memory_entry_versions AS v
+           ON v.scope_id=h.scope_id AND v.memory_artifact_id=h.memory_artifact_id
+          AND v.entry_version_id=h.entry_version_id
+         WHERE 1=1 {base_filter}
+         ORDER BY l2_distance(m.embedding, :query_vector) APPROXIMATE
+         LIMIT :candidate_limit)
+        """
+        self._hybrid_sql = text(sql).bindparams(
+            bindparam("memory_artifact_ids", expanding=True),
+            bindparam("query_vector", type_=VECTOR(vector.profile.dimension)),
+        )
+        tagged_sql = sql.replace(
+            "ORDER BY MATCH(h.searchable_text)",
+            memory_tag_sql("f").replace("f.", "h.") + "ORDER BY MATCH(h.searchable_text)",
+        ).replace(
+            "ORDER BY l2_distance(m.embedding",
+            memory_tag_sql("m") + "ORDER BY l2_distance(m.embedding",
+        )
+        self._tagged_hybrid_sql = text(tagged_sql).bindparams(
+            bindparam("memory_artifact_ids", expanding=True),
+            bindparam("tag_keys", expanding=True),
+            bindparam("tag_hashes", expanding=True),
+            bindparam("query_vector", type_=VECTOR(vector.profile.dimension)),
+        )
+
+    async def search(self, connection, scope_id, request, /):
+        if request.mode != "hybrid":
+            return await super().search(connection, scope_id, request)
+        if request.embedding_profile != self._vector.profile or request.query_vector is None:
+            raise CapabilityNotSupportedError("embedding-profile")
+        if not await self._vector.vector_complete(connection, scope_id, request.memories, self._vector.profile):
+            raise CapabilityNotSupportedError("vector")
+        rows = (
+            await connection.execute(
+                self._hybrid_sql if request.tag_filter is None else self._tagged_hybrid_sql,
+                {
+                    "scope_id": scope_id,
+                    "memory_artifact_ids": tuple(memory.artifact_id for memory in request.memories),
+                    "analyzed_query": request.analyzed_query,
+                    "query_vector": validate_embedding(request.query_vector, dimension=self._vector.profile.dimension),
+                    "candidate_limit": request.candidate_limit,
+                    **memory_tag_parameters(request.tag_filter),
+                },
+            )
+        ).mappings().all()
+        fts = memory_channel_hits((row for row in rows if row["channel"] == "fts"), request.memories)
+        vector = memory_channel_hits((row for row in rows if row["channel"] == "vector"), request.memories)
+        return MemorySearchChannels(fts=fts, vector=vector)

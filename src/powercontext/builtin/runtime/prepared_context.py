@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from itertools import chain
@@ -106,6 +107,7 @@ class PreparedContextBuild:
     origins: tuple[PreparedContextOrigin, ...]
     omissions: PreparedContextOmissions = PreparedContextOmissions()
     code_origins: tuple[CodeEvidenceRef, ...] = ()
+    fragments: tuple[PreparedContextFragment, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -115,6 +117,16 @@ class MemoryEntryAddress:
     memory: ArtifactAddress
     entry_id: str
     entry_version_id: str
+
+
+@dataclass(frozen=True)
+class PreparedContextFragment:
+    """One literal, exactly addressable span selected from a Memory entry."""
+
+    address: MemoryEntryAddress
+    start: int
+    end: int
+    text: str
 
 
 PreparedContextOrigin = MemoryCitation | ArtifactRef | MemoryEntryAddress | ArtifactAddress
@@ -235,6 +247,13 @@ class PreparedContextBuilder:
         if sum(len(candidates.hits) for candidates in experience_candidates) > self.experience_candidate_limit:
             raise PreparedContextInvariantError("experience-candidate-limit")
 
+        if request.evidence_selection:
+            return self._build_evidence_selection(
+                request=request,
+                current_scope_id=current_scope_id,
+                memory_candidates=memory_candidates,
+            )
+
         content, origins, omissions = self._select_entries(
             request=request,
             current_scope_id=current_scope_id,
@@ -254,6 +273,65 @@ class PreparedContextBuilder:
             context=PreparedContext(status="ready", content=content, content_bytes=content_bytes),
             origins=origins,
             omissions=omissions,
+        )
+
+    def _build_evidence_selection(
+        self,
+        *,
+        request: PrepareContextRequest,
+        current_scope_id: str | None,
+        memory_candidates: Sequence[PreparedMemoryCandidates],
+    ) -> PreparedContextBuild:
+        query_terms = _evidence_terms(request.query)
+        ranked: list[tuple[float, int, int, PreparedContextFragment]] = []
+        ordinal = 0
+        for group_rank, group in enumerate(memory_candidates):
+            for hit_rank, hit in enumerate(group.hits):
+                if group.memory_ref is None or hit.memory_ref != group.memory_ref:
+                    raise PreparedContextInvariantError("memory-ref-mismatch")
+                scope_id = group.scope_id or current_scope_id
+                if not scope_id:
+                    raise PreparedContextInvariantError("memory-fragment-scope-missing")
+                address = MemoryEntryAddress(
+                    memory=ArtifactAddress(scope_id=scope_id, artifact=hit.memory_ref),
+                    entry_id=hit.entry_id,
+                    entry_version_id=hit.entry_version_id,
+                )
+                for start, end in _evidence_spans(hit.text):
+                    text = hit.text[start:end]
+                    terms = _evidence_terms(text)
+                    matches = sum(1 for term in query_terms if any(_terms_match(term, candidate) for candidate in terms))
+                    coverage = matches / max(1, len(query_terms))
+                    density = matches / max(1, len(terms))
+                    score = coverage * 10 + density + max(hit.score, 0.0) * 0.001
+                    ranked.append((score, group_rank * 100 + hit_rank, ordinal, PreparedContextFragment(address, start, end, text)))
+                    ordinal += 1
+
+        ranked.sort(key=lambda item: (-item[0], item[1], item[2]))
+        selected: list[PreparedContextFragment] = []
+        selected_keys: set[tuple[str, str, int, int]] = set()
+        content: str | None = None
+        for _score, _rank, _ordinal, fragment in ranked:
+            key = (fragment.address.memory.scope_id, fragment.address.entry_version_id, fragment.start, fragment.end)
+            if key in selected_keys:
+                continue
+            candidate_fragments = (*selected, fragment)
+            candidate_content = _render_fragments(candidate_fragments)
+            if len(candidate_content.encode("utf-8")) > request.max_bytes:
+                continue
+            selected.append(fragment)
+            selected_keys.add(key)
+            content = candidate_content
+            if len(selected) >= self.entry_limit:
+                break
+
+        if not selected or content is None:
+            return PreparedContextBuild(context=self.empty(), origins=(), fragments=())
+        origins = tuple(fragment.address for fragment in selected)
+        return PreparedContextBuild(
+            context=PreparedContext(status="ready", content=content, content_bytes=len(content.encode("utf-8"))),
+            origins=origins,
+            fragments=tuple(selected),
         )
 
     def probe_budget(
@@ -692,6 +770,52 @@ def _render(entries: Sequence[_PreparedContextEntry]) -> str:
     }
     encoded = json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
     return "\n\n".join((TRUST_POLICY, f"{_BEGIN_MARKER}\n{encoded}\n{_END_MARKER}"))
+
+
+def _render_fragments(fragments: Sequence[PreparedContextFragment]) -> str:
+    items = []
+    for fragment in fragments:
+        address = fragment.address
+        items.append(
+            {
+                "citation": {
+                    "scope_id": address.memory.scope_id,
+                    "memory_ref": address.memory.artifact.model_dump(mode="json"),
+                    "entry_id": address.entry_id,
+                    "entry_version_id": address.entry_version_id,
+                },
+                "content": fragment.text,
+                "start": fragment.start,
+                "end": fragment.end,
+            }
+        )
+    encoded = json.dumps({"trust": "untrusted_history", "items": items}, ensure_ascii=False, separators=(",", ":"))
+    return "\n\n".join((TRUST_POLICY, f"{_BEGIN_MARKER}\n{encoded}\n{_END_MARKER}"))
+
+
+def _evidence_terms(text: str) -> tuple[str, ...]:
+    return tuple(re.findall(r"[a-z]+|\d+", text.lower()))
+
+
+def _terms_match(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    return len(left) >= 5 and len(right) >= 5 and left[:5] == right[:5]
+
+
+def _evidence_spans(text: str) -> tuple[tuple[int, int], ...]:
+    spans: list[tuple[int, int]] = []
+    for match in re.finditer(r"[^.!?\n]+(?:[.!?]+|$)", text):
+        start, end = match.span()
+        while start < end and text[start].isspace():
+            start += 1
+        while end > start and text[end - 1].isspace():
+            end -= 1
+        if start < end:
+            spans.append((start, end))
+    if not spans and text:
+        spans.append((0, len(text)))
+    return tuple(spans)
 
 
 def _text_item(entry: _PreparedContextEntry) -> ContextTextItem:
