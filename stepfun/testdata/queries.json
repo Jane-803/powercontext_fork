@@ -1,0 +1,5 @@
+[
+  { "query": "混合检索在哪里完成？", "relevant": ["seekdb.txt-0-0"] },
+  { "query": "WebGPU 不可用怎么办？", "relevant": ["seekdb.txt-0-1"] },
+  { "query": "数据保存在哪里？", "relevant": ["seekdb.txt-0-2"] }
+]

@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "composite": true, "skipLibCheck": true, "module": "NodeNext", "moduleResolution": "NodeNext",
+    "allowSyntheticDefaultImports": true, "esModuleInterop": true, "strict": true, "target": "ES2022",
+    "types": ["node"], "outDir": ".tsbuild"
+  },
+  "include": ["server", "vite.config.ts"]
+}

@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.seekdb/
+.bindings-cache/
+*.tsbuildinfo
+.tsbuild/
+.env
