@@ -59,8 +59,24 @@ python scripts/verify.py
 
 `verify.py` 同时重写了 `records/validation-preflight.json`，内容为 6 篇导入、查询 `long context retrieval quality`、年份下限 2020 及 1 条记录结果。
 
+## pyseekdb 安装结果
+
+已在 `qoder/.venv` 安装并验证 `pyseekdb 1.4.0.post1`：
+
+```bash
+python -m venv .venv
+.venv/Scripts/python -m pip install -r requirements.txt "pyseekdb==1.4.0.post1"
+.venv/Scripts/python -m pip install "onnxruntime==1.19.2"
+```
+
+- `import pyseekdb` 正常，`pip check` 显示 `No broken requirements found`。
+- `onnxruntime 1.31.1` 和 `1.22.1` 在该 Windows 主机加载 native DLL 时崩溃（访问冲突/DLL 初始化失败），固定为 `onnxruntime 1.19.2` 后正常。PaperTrail 自行生成向量，不使用 onnxruntime 推理。
+- 嵌入式客户端按预期不可用：`pylibseekdb` 仅支持 Linux/macOS，Windows 必须连接 seekdb Server。
+- server 模式已执行到 TCP 连接阶段；本机 `127.0.0.1:2881` 没有 seekdb Server，报 `WinError 10061`（目标计算机积极拒绝）。本机没有 Docker 或 WSL，未启动真实数据库。
+- `requirements.txt` 的 pyseekdb 平台标记仍跳过 Windows；在 Windows 复现时需显式安装 pyseekdb，并固定可用的 onnxruntime 版本。
+
 ## 未执行项与限制
 
-- 当前 Windows 环境未安装 `pyseekdb`，没有启动真实 seekdb 服务；`verify.py` 使用记录型替身验证请求形状，真实数据库检索需要在 Linux/macOS 嵌入式模式或配置 `SEEKDB_HOST` 后执行。
+- 真实 seekdb 检索仍未执行；`verify.py` 使用记录型替身验证请求形状。真实检索需要在 Linux/macOS 使用嵌入式模式，或配置 `SEEKDB_HOST` 连接可用的 seekdb Server。
 - 按要求未提交 git、未发布 Qoder Sites。
 - 本环境无法生成 Qoder 账号 UID 和对话截图，记录中没有虚构这些证据。
