@@ -1,0 +1,20 @@
+{
+  "before": {
+    "label": "before",
+    "command": "CATALOG_SOURCE=snapshots\\before python -m pytest tests/test_catalog.py -q",
+    "exit_code": 1,
+    "stdout": "FFF..                                                                    [100%]\n================================== FAILURES ===================================\n____________ test_min_rating_can_be_combined_with_existing_filters ____________\n\n    def test_min_rating_can_be_combined_with_existing_filters() -> None:\n>       assert [place[\"name\"] for place in filter_places(PLACES, category=\"cafe\", max_distance_m=250, min_rating=4.5)] == [\n            \"Near Great\"\n        ]\nE       TypeError: filter_places() got an unexpected keyword argument 'min_rating'\n\ntests\\test_catalog.py:15: TypeError\n____________ test_min_rating_rejects_values_outside_contract[-0.1] ____________\n\nrating = -0.1\n\n    @pytest.mark.parametrize(\"rating\", [-0.1, 5.1])\n    def test_min_rating_rejects_values_outside_contract(rating: float) -> None:\n        with pytest.raises(ValueError, match=\"between 0 and 5\"):\n>           filter_places(PLACES, min_rating=rating)\nE           TypeError: filter_places() got an unexpected keyword argument 'min_rating'\n\ntests\\test_catalog.py:23: TypeError\n____________ test_min_rating_rejects_values_outside_contract[5.1] _____________\n\nrating = 5.1\n\n    @pytest.mark.parametrize(\"rating\", [-0.1, 5.1])\n    def test_min_rating_rejects_values_outside_contract(rating: float) -> None:\n        with pytest.raises(ValueError, match=\"between 0 and 5\"):\n>           filter_places(PLACES, min_rating=rating)\nE           TypeError: filter_places() got an unexpected keyword argument 'min_rating'\n\ntests\\test_catalog.py:23: TypeError\n=========================== short test summary info ===========================\nFAILED tests/test_catalog.py::test_min_rating_can_be_combined_with_existing_filters\nFAILED tests/test_catalog.py::test_min_rating_rejects_values_outside_contract[-0.1]\nFAILED tests/test_catalog.py::test_min_rating_rejects_values_outside_contract[5.1]\n",
+    "stderr": ""
+  },
+  "after": {
+    "label": "after",
+    "command": "CATALOG_SOURCE=sample_app python -m pytest tests/test_catalog.py -q",
+    "exit_code": 0,
+    "stdout": ".....                                                                    [100%]\n",
+    "stderr": ""
+  },
+  "expected": {
+    "before_nonzero": true,
+    "after_zero": true
+  }
+}

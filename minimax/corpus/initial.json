@@ -1,0 +1,8 @@
+{
+  "sources": [
+    {"path": "specs/place-filter-v1.md", "kind": "spec", "logical_id": "place-filter-contract", "version": 1, "status": "current", "summary": "Place filtering API requirements"},
+    {"path": "snapshots/before/catalog.py", "kind": "code", "logical_id": "catalog-filter-code", "version": 1, "status": "current", "summary": "Implementation of filter_places"},
+    {"path": "tests/test_catalog.py", "kind": "test", "logical_id": "catalog-filter-tests", "version": 1, "status": "current", "summary": "Target and regression tests for filter_places"},
+    {"path": "docs/decision-ordering.md", "kind": "decision", "logical_id": "place-order-decision", "version": 1, "status": "current", "summary": "Why filters preserve input order"}
+  ]
+}

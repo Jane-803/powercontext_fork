@@ -1,0 +1,13 @@
+{
+  "objective": "Add min_rating filtering while preserving the existing filter contract",
+  "completed": [
+    "Imported current specification, implementation, decision and tests into seekdb",
+    "Selected target tests and confirmed the before snapshot fails for the missing min_rating behavior"
+  ],
+  "todo": [
+    "Use MiniMax to generate the catalog.py change",
+    "Run target and regression tests and record their exit codes"
+  ],
+  "next_action": "Generate the implementation with the selected context and run scripts/verify_tests.py",
+  "disposition": "partial"
+}

@@ -1,0 +1,4 @@
+{
+  "status": "example-only-not-evidence",
+  "instruction": "Run the documented run-minimax command with MINIMAX_API_KEY. The command replaces this example with records/minimax_run.json containing model, request ID, usage, context digest and response."
+}

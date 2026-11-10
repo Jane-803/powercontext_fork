@@ -1,0 +1,13 @@
+{
+  "command_write": "python -m sdd_context.cli --root . save-state fixtures/state-in-progress.json",
+  "write_exit_code": 0,
+  "scope_id": "scp_0m45q9v90rkr8b5r2t0sp9t2tm",
+  "artifact_id": "handoff",
+  "revision": 2,
+  "command_read_new_process": "python -m sdd_context.cli --root . load-state",
+  "read_exit_code": 0,
+  "reused_next_action": null,
+  "reused_disposition": "complete",
+  "backend": "PowerContext 1.2.0 HTTP API",
+  "note": "The local runtime database is excluded; this record captures the successful write and independent-process read."
+}
