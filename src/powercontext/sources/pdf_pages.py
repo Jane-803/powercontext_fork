@@ -152,10 +152,10 @@ _STOPWORDS = frozenset(
 )
 _FINANCIAL_EXPANSIONS = {
     "ebitda": ("consolidated statement of income", "operating income", "depreciation amortization", "cash flows"),
-    "capex": ("capital expenditures", "capital spending"),
+    "capex": ("capital expenditures", "capital spending", "purchases property plant equipment"),
     "restructuring": ("restructuring impairment charges",),
     "legal": ("legal proceedings", "litigation"),
-    "geographies": ("divisions", "geographic divisions", "international operations"),
+    "geographies": ("our divisions", "north america divisions", "geographic divisions", "international operations"),
     "margin": ("consolidated statement of income", "net revenue", "operating profit"),
     "debt": ("long term debt", "short term borrowings", "total debt"),
     "revenue": ("net revenue", "net sales"),
@@ -167,6 +167,19 @@ _FINANCIAL_EXPANSIONS = {
     "dividend": ("dividends declared", "dividends paid"),
     "employees": ("employees", "workforce"),
     "cash": ("cash flows", "cash and cash equivalents"),
+    "ppne": ("property plant equipment net",),
+    "ppe": ("property plant equipment",),
+    "assets": ("consolidated balance sheet", "total assets"),
+    "liabilities": ("consolidated balance sheet", "total liabilities"),
+    "equity": ("consolidated balance sheet", "shareholders equity"),
+    "profit": ("consolidated statement of income", "operating profit"),
+    "earnings": ("consolidated statement of income", "net income"),
+    "expenses": ("consolidated statement of income", "operating expenses"),
+    "receivable": ("accounts receivable",),
+    "payable": ("accounts payable",),
+    "goodwill": ("goodwill intangible assets",),
+    "lease": ("operating lease", "lease liabilities"),
+    "pension": ("pension postretirement benefits",),
 }
 
 
@@ -176,8 +189,9 @@ def _retrieval_queries(question: str) -> tuple[str, ...]:
     queries: list[str] = [question]
     if unique:
         queries.append(" ".join(unique))
-    queries.extend(" ".join(unique[index : index + size]) for size in (4, 3, 2) for index in range(len(unique) - size + 1))
-    queries.extend(unique)
+    informative = tuple(term for term in unique if len(term) >= 4 or term.isdigit())
+    queries.extend(" ".join(informative[index : index + 3]) for index in range(min(len(informative) - 2, 6)))
+    queries.extend(informative[:12])
     queries.extend(phrase for term in unique for phrase in _FINANCIAL_EXPANSIONS.get(term, ()))
     return tuple(query for query in dict.fromkeys(queries) if query.strip())
 
@@ -311,14 +325,14 @@ async def search_pdf_pages(memory, question: str, limit: int = 10) -> tuple[Memo
     for query_index, query in enumerate(queries):
         page = await memory.search(SearchMemoryRequest(query=query, mode="fts", limit=max(limit, 30)))
         ranked_hits.extend((query_index, rank, hit) for rank, hit in enumerate(page.hits, start=1))
-        if query in expansions and page.hits:
-            expansion_anchors.append(page.hits[0])
+        if query in expansions:
+            expansion_anchors.extend(page.hits[:2])
 
     citations: list[MemoryCitation] = []
     ranked = _rank_candidates(question, ranked_hits)
     anchored = []
     anchored_ids = set()
-    for hit in (*expansion_anchors, *ranked):
+    for hit in (*expansion_anchors[:8], *ranked):
         identity = (hit.memory_ref.artifact_id, hit.memory_ref.revision, hit.entry_id, hit.entry_version_id)
         if identity not in anchored_ids:
             anchored.append(hit)
