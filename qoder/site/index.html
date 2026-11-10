@@ -1,0 +1,15 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="PaperTrail 用 seekdb 帮研究者从论文与笔记中快速找到值得读的证据。"><title>PaperTrail · 研究资料雷达</title><link rel="stylesheet" href="styles.css"></head><body>
+<nav><a class="brand" href="#top"><span>PT</span> PaperTrail</a><div><a href="#demo">在线演示</a><a href="#how">技术实现</a><a href="https://github.com/Jane-803/powercontext_fork" target="_blank">代码仓库 ↗</a></div></nav>
+<main id="top"><section class="hero"><div class="eyebrow">RESEARCH MATERIAL RADAR</div><h1>别再重新翻遍<br><em>读过的每一篇论文</em></h1><p>导入论文摘要与研究笔记，用一句话检索跨文献证据。PaperTrail 让每次阅读都能在下次研究中被找到。</p><div class="actions"><a class="primary" href="#demo">试试研究雷达</a><a class="secondary" href="#how">查看工作原理</a></div><div class="metrics"><div><strong>6</strong><span>演示文献</span></div><div><strong>&lt; 1s</strong><span>本地检索</span></div><div><strong>100%</strong><span>结果可溯源</span></div></div></section>
+<section id="demo" class="demo"><div class="section-head"><div><span class="kicker">LIVE DEMO</span><h2>把研究问题交给资料库</h2></div><span id="mode" class="badge">演示数据</span></div><form id="search-form"><label for="query">你正在研究什么？</label><div class="search-row"><input id="query" value="如何提高长上下文中的检索质量？" autocomplete="off"><button>检索证据</button></div><div class="filters"><label>起始年份 <select id="year"><option value="">不限</option><option value="2020" selected>2020</option><option value="2022">2022</option><option value="2023">2023</option></select></label><span>语义相似度 + 年份条件由 seekdb 执行</span></div></form><div id="status" class="status">选择问题，开始检索。</div><div id="results" class="results"></div></section>
+<section class="pain"><div><span class="kicker">WHY PAPERTRAIL</span><h2>研究时间应该花在思考，<br>而不是找文件</h2></div><div class="pain-grid"><article><b>01</b><h3>资料散落</h3><p>论文、课程笔记和实验记录各在一处，关键词也记不清。</p></article><article><b>02</b><h3>重复阅读</h3><p>忘记某个结论来自哪里，只能重新打开十几篇 PDF。</p></article><article><b>03</b><h3>缺少出处</h3><p>普通聊天回答很流畅，但很难核验原文和来源。</p></article></div></section>
+<section id="how" class="how"><span class="kicker">HOW IT WORKS</span><h2>简单流程，真实数据库</h2><div class="steps"><article><span>1</span><h3>导入</h3><p>论文摘要、标签、年份和来源写入 seekdb。</p></article><i>→</i><article><span>2</span><h3>检索</h3><p>语义向量与结构化年份条件在数据库内联合查询。</p></article><i>→</i><article><span>3</span><h3>核验</h3><p>结果展示相似度、摘要和原始论文链接。</p></article></div></section>
+<section class="tech"><div><span class="kicker">BUILT WITH</span><h2>Qoder × seekdb</h2><p>Qoder 负责需求拆解、前后端开发、测试与站点发布；seekdb 负责研究资料的持久化和向量检索。静态站点保留可交互演示，本地启动后自动切换到真实数据库。</p></div><pre><code>POST /api/search
+{
+  "query": "long context retrieval",
+  "year_from": 2020
+}
+
+→ seekdb Collection.query(...)
+→ ranked, cited results</code></pre></section></main>
+<footer><div class="brand"><span>PT</span> PaperTrail</div><p>让每次阅读，都成为下一次发现的起点。</p><small>Qoder × OceanBase Competition · 2026</small></footer><script src="app.js"></script></body></html>

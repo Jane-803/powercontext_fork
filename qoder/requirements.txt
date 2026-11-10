@@ -1,0 +1,2 @@
+pyseekdb==1.4.0.post1; sys_platform == "linux" or sys_platform == "darwin"
+pytest==8.3.5
