@@ -9,6 +9,15 @@ from pathlib import Path
 from .service import PaperTrailService
 from .store import PaperStore
 
+MAX_BODY_BYTES = 64 * 1024
+
+
+class RequestError(Exception):
+    def __init__(self, status: HTTPStatus, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.message = message
+
 
 class Handler(SimpleHTTPRequestHandler):
     service: PaperTrailService
@@ -18,13 +27,43 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         try:
-            size = int(self.headers.get("Content-Length", "0"))
-            request = json.loads(self.rfile.read(size))
-            self.respond(HTTPStatus.OK, self.service.search(request))
-        except (ValueError, json.JSONDecodeError) as exc:
+            request = self.read_json_body()
+        except RequestError as exc:
+            self.respond(exc.status, {"error": exc.message})
+            return
+        try:
+            payload = self.service.search(request)
+        except ValueError as exc:
             self.respond(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
         except Exception as exc:
             self.respond(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+        else:
+            self.respond(HTTPStatus.OK, payload)
+
+    def read_json_body(self) -> dict:
+        content_length = self.headers.get("Content-Length")
+        if content_length is None:
+            raise RequestError(HTTPStatus.LENGTH_REQUIRED, "Content-Length header is required")
+        try:
+            size = int(content_length)
+        except ValueError as exc:
+            raise RequestError(HTTPStatus.BAD_REQUEST, "Content-Length must be an integer") from exc
+        if size <= 0:
+            raise RequestError(HTTPStatus.BAD_REQUEST, "request body must not be empty")
+        if size > MAX_BODY_BYTES:
+            raise RequestError(
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE, f"request body must not exceed {MAX_BODY_BYTES} bytes"
+            )
+        raw = self.rfile.read(size)
+        try:
+            body = json.loads(raw)
+        except UnicodeDecodeError as exc:
+            raise RequestError(HTTPStatus.BAD_REQUEST, "request body must be UTF-8 encoded JSON") from exc
+        except json.JSONDecodeError as exc:
+            raise RequestError(HTTPStatus.BAD_REQUEST, f"request body is not valid JSON: {exc.msg}") from exc
+        if not isinstance(body, dict):
+            raise RequestError(HTTPStatus.BAD_REQUEST, "request body must be a JSON object")
+        return body
 
     def respond(self, status: HTTPStatus, payload: dict) -> None:
         data = json.dumps(payload, ensure_ascii=False).encode()

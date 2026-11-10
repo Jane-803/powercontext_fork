@@ -49,7 +49,9 @@ curl -X POST http://127.0.0.1:8787/api/search \
 4. 在 Qoder Sites 选择 `qoder/site/` 创建站点，发布并设置“任何人都可访问”。
 5. 无痕窗口验证 URL，将真实信息写入 `records/sites-publication.json` 和 `records/qoder-development.md`，再次提交。
 
-当前环境未安装或登录 Qoder，因此仓库不包含伪造的 Qoder 对话或 Sites URL。没有真实 Qoder 记录和公开 Sites 地址时不要提交比赛平台。
+本仓库已在 Qoder 中完成一次真实开发迭代，任务内容、修改范围和测试结果见
+`records/qoder-development.md`。Qoder Sites 尚未发布；提测前仍需使用个人账号发布
+`site/`，设置“任何人都可访问”，并补充公开网址和发布截图。
 
 ## 目录
 
