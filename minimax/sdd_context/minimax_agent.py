@@ -29,8 +29,9 @@ def run_minimax(task: str, context: dict[str, Any], output: Path, target: Path |
     api_key = os.getenv("MINIMAX_API_KEY")
     if not api_key:
         raise RuntimeError("Set MINIMAX_API_KEY; credentials are never written to the record.")
-    model = os.getenv("MINIMAX_MODEL", "MiniMax-M2.1")
-    base_url = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/anthropic").rstrip("/")
+    model = os.getenv("MINIMAX_MODEL", "MiniMax-M3.1-Flash")
+    api_format = os.getenv("MINIMAX_API_FORMAT", "openai").lower()
+    base_url = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.chat/v1").rstrip("/")
     prompt = (
         "You are modifying the supplied Python business module. Use only the current specifications, preserve the "
         "listed compatibility behavior, and return the complete replacement content of sample_app/catalog.py inside "
@@ -38,20 +39,27 @@ def run_minimax(task: str, context: dict[str, Any], output: Path, target: Path |
         f"TASK:\n{task}\n\nENGINEERING CONTEXT:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
     )
     request_body = {"model": model, "max_tokens": 4096, "messages": [{"role": "user", "content": prompt}]}
-    response = httpx.post(
-        base_url + "/v1/messages",
-        headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-        json=request_body,
-        timeout=120,
-    )
+    if api_format == "openai":
+        url = base_url + "/chat/completions"
+        headers = {"Authorization": f"Bearer {api_key}", "content-type": "application/json"}
+    elif api_format == "anthropic":
+        url = base_url + "/v1/messages"
+        headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+    else:
+        raise RuntimeError("MINIMAX_API_FORMAT must be 'openai' or 'anthropic'.")
+    response = httpx.post(url, headers=headers, json=request_body, timeout=120)
     response.raise_for_status()
     body = response.json()
-    text = "\n".join(block["text"] for block in body.get("content", []) if block.get("type") == "text")
+    if api_format == "openai":
+        choices = body.get("choices") or []
+        text = choices[0].get("message", {}).get("content", "") if choices else ""
+    else:
+        text = "\n".join(block["text"] for block in body.get("content", []) if block.get("type") == "text")
     before = target.read_bytes() if target is not None else None
     generated = extract_python_source(text) if target is not None else None
     record = {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-        "provider": "MiniMax Anthropic-compatible API",
+        "provider": f"MiniMax {api_format}-compatible API",
         "base_url": base_url,
         "model": body.get("model", model),
         "task": task,

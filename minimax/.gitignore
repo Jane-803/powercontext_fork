@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 .runtime/
 .env
+records/minimax_input.json

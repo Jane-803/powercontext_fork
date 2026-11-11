@@ -9,7 +9,7 @@
 - Python 3.11+
 - PowerContext 1.2.0
 - pyseekdb 1.4.0.post1
-- MiniMax Anthropic-compatible API，默认 `MiniMax-M2.1`
+- MiniMax OpenAI-compatible API，默认 `MiniMax-M3.1-Flash`；也保留 Anthropic-compatible 配置
 - Linux/macOS 可直接使用嵌入式 seekdb；Windows 使用 `SEEKDB_*` 连接 seekdb Server
 
 ```bash
@@ -46,7 +46,7 @@ python -m sdd_context.cli --root . run-minimax \
   --context records/context.json --output records/minimax_run.json
 ```
 
-`records/minimax_run.json` 保存供应商、模型、请求 ID、用量、任务、上下文摘要、模型返回代码及修改前后 SHA-256，不保存 Key 或私有思维链。命令要求 MiniMax 返回唯一的 Python 代码块，编译检查通过后原子写入 `sample_app/catalog.py`；响应格式或语法异常时不会覆盖业务文件。没有真实 Token 时命令会明确失败，不会生成伪记录。
+`records/minimax_run.json` 保存供应商、协议、模型、请求 ID、用量、任务、上下文摘要、模型返回代码及修改前后 SHA-256，不保存 Key 或私有思维链。中国区默认通过 OpenAI-compatible API 调用 `MiniMax-M3.1-Flash`；设置 `MINIMAX_API_FORMAT=anthropic` 可切换 Anthropic-compatible API。命令要求 MiniMax 返回唯一的 Python 代码块，编译检查通过后原子写入 `sample_app/catalog.py`；响应格式或语法异常时不会覆盖业务文件。没有真实 Token 时命令会明确失败，不会生成伪记录。
 
 4. 对同一组测试执行修改前后验证：
 
