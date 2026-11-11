@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>迹点 | 项目证据与进度</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="mark">迹</span><span>迹点 <small>TRACEBOARD</small></span></div>
+    <div class="top-actions"><span id="connection" class="connection">连接中</span><a href="https://github.com/oceanbase/seekdb" target="_blank" rel="noopener">seekdb</a></div>
+  </header>
+  <main class="shell">
+    <aside class="rail">
+      <div class="rail-heading">工作空间</div>
+      <label for="project">当前项目</label>
+      <input id="project" value="科研项目 A" maxlength="100" aria-label="当前项目">
+      <nav class="nav" aria-label="视图">
+        <button class="active" data-view="evidence">资料与证据</button>
+        <button data-view="tasks">任务进度</button>
+        <button data-view="report">周报生成</button>
+      </nav>
+      <div class="rail-foot">把结论、来源和进度留在同一处。</div>
+    </aside>
+    <section class="workspace">
+      <div id="notice" class="notice" role="status" hidden></div>
+      <section id="evidence-view" class="view">
+        <div class="heading"><div><p class="eyebrow">KNOWLEDGE LOG</p><h1>资料与证据</h1><p>记录可追溯的工作成果，并在需要时找回来。</p></div><button id="new-evidence" class="primary">＋ 新增记录</button></div>
+        <div class="toolbar"><input id="search" type="search" placeholder="搜索标题或内容" aria-label="搜索证据"><select id="kind-filter" aria-label="记录类型"><option value="">全部类型</option><option value="note">笔记</option><option value="meeting">会议</option><option value="result">成果</option><option value="blocker">阻塞</option></select><input id="start-filter" type="date" aria-label="开始日期"><input id="end-filter" type="date" aria-label="结束日期"><button id="search-button">检索</button></div>
+        <p id="result-count" class="result-count"></p><div id="evidence-list" class="list"></div>
+      </section>
+      <section id="tasks-view" class="view" hidden>
+        <div class="heading"><div><p class="eyebrow">PROGRESS</p><h1>任务进度</h1><p>让完成状态与实际证据保持对应。</p></div><button id="new-task" class="primary">＋ 新增任务</button></div>
+        <div id="task-list" class="list"></div>
+      </section>
+      <section id="report-view" class="view" hidden>
+        <div class="heading"><div><p class="eyebrow">WEEKLY REVIEW</p><h1>周报生成</h1><p>按时间汇集记录和任务，生成可核对的草稿。</p></div></div>
+        <div class="toolbar"><label>从 <input id="report-start" type="date"></label><label>到 <input id="report-end" type="date"></label><button id="generate" class="primary">生成周报</button><button id="copy-report">复制 Markdown</button></div>
+        <pre id="report-output" class="report-output">选择日期后生成周报。</pre>
+      </section>
+    </section>
+  </main>
+  <dialog id="evidence-dialog"><form id="evidence-form" class="form"><div class="dialog-head"><h2>新增记录</h2><button type="button" class="icon" data-close aria-label="关闭">×</button></div><label>标题<input name="title" maxlength="200" required></label><div class="two"><label>类型<select name="kind"><option value="note">笔记</option><option value="meeting">会议</option><option value="result">成果</option><option value="blocker">阻塞</option></select></label><label>日期<input name="occurred_on" type="date" required></label></div><label>内容<textarea name="content" maxlength="10000" rows="6" required></textarea></label><label>来源链接<input name="source_url" type="url" maxlength="500" placeholder="https://..."></label><div class="form-actions"><button type="button" data-close>取消</button><button class="primary" type="submit">保存记录</button></div></form></dialog>
+  <dialog id="task-dialog"><form id="task-form" class="form"><div class="dialog-head"><h2>新增任务</h2><button type="button" class="icon" data-close aria-label="关闭">×</button></div><label>任务名称<input name="title" maxlength="200" required></label><label>截止日期<input name="due_on" type="date"></label><div class="form-actions"><button type="button" data-close>取消</button><button class="primary" type="submit">保存任务</button></div></form></dialog>
+  <script src="/app.js"></script>
+</body>
+</html>
