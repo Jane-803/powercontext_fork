@@ -36,9 +36,12 @@ def test_run_minimax_applies_valid_code_and_records_hashes(tmp_path: Path, monke
 
 def test_openai_compatible_response_is_supported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     class OpenAIResponse(FakeResponse):
+        headers = {}
+
         def json(self) -> dict:
             return {
                 "model": "MiniMax-M2.5",
+                "request_id": "req-openai-1",
                 "usage": {"prompt_tokens": 12, "completion_tokens": 8},
                 "choices": [{"message": {"content": "```python\nVALUE = 3\n```"}}],
             }
@@ -54,6 +57,7 @@ def test_openai_compatible_response_is_supported(tmp_path: Path, monkeypatch: py
 
     assert target.read_text(encoding="utf-8") == "VALUE = 3\n"
     assert record["provider"] == "MiniMax openai-compatible API"
+    assert record["request_id"] == "req-openai-1"
 
 
 def test_invalid_response_does_not_replace_target(tmp_path: Path) -> None:

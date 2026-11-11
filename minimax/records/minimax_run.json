@@ -1,0 +1,27 @@
+{
+  "timestamp_utc": "2026-11-11T06:00:30.920040+00:00",
+  "provider": "MiniMax openai-compatible API",
+  "base_url": "https://api.minimax.chat/v1",
+  "model": "MiniMax-M3.1-Flash",
+  "task": "Add an optional min_rating filter to filter_places. Reject ratings outside 0..5. Keep category and max_distance behavior and preserve input order.",
+  "context_sha256": "9864a79818987828fa55d416ee2403bbe28f4ba5e7f9f4872e74a7e96122f8c0",
+  "request_id": "07433779eff4675b41fa1693904d77ef",
+  "usage": {
+    "total_tokens": 2061,
+    "total_characters": 0,
+    "prompt_tokens": 1406,
+    "completion_tokens": 655,
+    "completion_tokens_details": {
+      "reasoning_tokens": 420
+    },
+    "prompt_tokens_details": {
+      "cached_tokens": 1280
+    }
+  },
+  "response": "```python\nfrom __future__ import annotations\n\nfrom typing import TypedDict\n\n\nclass Place(TypedDict):\n    name: str\n    category: str\n    distance_m: int\n    rating: float\n\n\ndef filter_places(\n    places: list[Place],\n    *,\n    category: str | None = None,\n    max_distance_m: int | None = None,\n    min_rating: float | None = None,\n) -> list[Place]:\n    \"\"\"Return matching places without reordering the caller's list.\"\"\"\n    if max_distance_m is not None and max_distance_m < 0:\n        raise ValueError(\"max_distance_m must be non-negative\")\n    if min_rating is not None and not 0 <= min_rating <= 5:\n        raise ValueError(\"min_rating must be between 0 and 5\")\n    return [\n        place\n        for place in places\n        if (category is None or place[\"category\"] == category)\n        and (max_distance_m is None or place[\"distance_m\"] <= max_distance_m)\n        and (min_rating is None or place[\"rating\"] >= min_rating)\n    ]\n```",
+  "applied_change": {
+    "target": "sample_app/catalog.py",
+    "before_sha256": "3197fe737bf51ef5217bb4ce763a22d1af3fd299940be63f11b7a3ecec2b1195",
+    "after_sha256": "9fe2e92f3b40ed0c9b8ff48633caf4db0f2dbe18583d2c6559d93f75c7437fda"
+  }
+}

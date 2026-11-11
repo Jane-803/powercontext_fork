@@ -14,7 +14,7 @@
 
 - **seekdb 1.4.0.post1**：持久化工程资料、向量和元数据；任务候选由实际 `Collection.query` 产生，而不是扫描内存或固定返回。
 - **PowerContext 1.2.0**：将目标、已完成事项、待办、下一步和来源保存为 Handoff revision。新的 CLI 进程从 HTTP Server 读回状态，随后合入上下文。
-- **MiniMax**：中国区默认使用 OpenAI-compatible `/v1/chat/completions`，并保留 Anthropic-compatible `/v1/messages` 配置。接口接收任务和检索上下文，生成并原子写入 `catalog.py`。调用记录包含 context digest、request ID、模型、token usage 及修改前后哈希，代码差异可与返回内容核对；无效响应不会修改目标文件。
+- **MiniMax**：中国区使用 OpenAI-compatible `/v1/chat/completions`，本次实际调用 `MiniMax-M3.1-Flash`；同时保留 Anthropic-compatible `/v1/messages` 配置。接口接收任务和检索上下文，生成并原子写入 `catalog.py`。`records/minimax_run.json` 记录实际 request ID、2061 tokens、context digest 及不同的修改前后哈希；无效响应不会修改目标文件。
 
 ## 有效性验证
 

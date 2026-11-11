@@ -64,7 +64,12 @@ def run_minimax(task: str, context: dict[str, Any], output: Path, target: Path |
         "model": body.get("model", model),
         "task": task,
         "context_sha256": hashlib.sha256(json.dumps(context, sort_keys=True).encode()).hexdigest(),
-        "request_id": response.headers.get("request-id") or response.headers.get("x-request-id"),
+        "request_id": (
+            response.headers.get("request-id")
+            or response.headers.get("x-request-id")
+            or body.get("request_id")
+            or body.get("id")
+        ),
         "usage": body.get("usage"),
         "response": text,
     }
