@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -10,7 +12,20 @@ from typing import Any
 import httpx
 
 
-def run_minimax(task: str, context: dict[str, Any], output: Path) -> dict[str, Any]:
+def extract_python_source(response: str) -> str:
+    blocks = re.findall(r"```python\s*\n(.*?)```", response, flags=re.DOTALL | re.IGNORECASE)
+    if len(blocks) != 1:
+        raise RuntimeError("MiniMax must return exactly one fenced Python code block; target was not changed.")
+    source = blocks[0].strip() + "\n"
+    compile(source, "<minimax-response>", "exec")
+    return source
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def run_minimax(task: str, context: dict[str, Any], output: Path, target: Path | None = None) -> dict[str, Any]:
     api_key = os.getenv("MINIMAX_API_KEY")
     if not api_key:
         raise RuntimeError("Set MINIMAX_API_KEY; credentials are never written to the record.")
@@ -32,6 +47,8 @@ def run_minimax(task: str, context: dict[str, Any], output: Path) -> dict[str, A
     response.raise_for_status()
     body = response.json()
     text = "\n".join(block["text"] for block in body.get("content", []) if block.get("type") == "text")
+    before = target.read_bytes() if target is not None else None
+    generated = extract_python_source(text) if target is not None else None
     record = {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "provider": "MiniMax Anthropic-compatible API",
@@ -43,6 +60,18 @@ def run_minimax(task: str, context: dict[str, Any], output: Path) -> dict[str, A
         "usage": body.get("usage"),
         "response": text,
     }
+    if target is not None and before is not None and generated is not None:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        generated_bytes = generated.encode("utf-8")
+        with tempfile.NamedTemporaryFile("wb", dir=target.parent, delete=False) as temporary:
+            temporary.write(generated_bytes)
+            temporary_path = Path(temporary.name)
+        temporary_path.replace(target)
+        record["applied_change"] = {
+            "target": f"{target.parent.name}/{target.name}",
+            "before_sha256": _sha256(before),
+            "after_sha256": _sha256(generated_bytes),
+        }
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="utf-8", newline="\n") as record_file:
         record_file.write(json.dumps(record, ensure_ascii=False, indent=2) + "\n")

@@ -29,6 +29,7 @@ def parser() -> argparse.ArgumentParser:
     agent.add_argument("--task", default=DEFAULT_TASK)
     agent.add_argument("--context", type=Path, default=Path("records/context.json"))
     agent.add_argument("--output", type=Path, default=Path("records/minimax_run.json"))
+    agent.add_argument("--target", type=Path, default=Path("sample_app/catalog.py"))
     return result
 
 
@@ -48,7 +49,12 @@ def main() -> None:
         print(json.dumps(service.state.load(), ensure_ascii=False, indent=2))
     elif args.command == "run-minimax":
         context = json.loads((root / args.context).read_text(encoding="utf-8"))
-        record = run_minimax(args.task, context, (root / args.output).resolve())
+        record = run_minimax(
+            args.task,
+            context,
+            (root / args.output).resolve(),
+            (root / args.target).resolve(),
+        )
         print(json.dumps({key: record[key] for key in ("provider", "model", "request_id", "usage")}, indent=2))
 
 

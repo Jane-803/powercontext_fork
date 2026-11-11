@@ -46,7 +46,7 @@ python -m sdd_context.cli --root . run-minimax \
   --context records/context.json --output records/minimax_run.json
 ```
 
-`records/minimax_run.json` 保存供应商、模型、请求 ID、用量、任务、上下文摘要和模型返回代码，不保存 Key 或私有思维链。将返回代码应用到 `sample_app/catalog.py`；本提交中的最终文件就是该目标结果。没有真实 Token 时命令会明确失败，不会生成伪记录。
+`records/minimax_run.json` 保存供应商、模型、请求 ID、用量、任务、上下文摘要、模型返回代码及修改前后 SHA-256，不保存 Key 或私有思维链。命令要求 MiniMax 返回唯一的 Python 代码块，编译检查通过后原子写入 `sample_app/catalog.py`；响应格式或语法异常时不会覆盖业务文件。没有真实 Token 时命令会明确失败，不会生成伪记录。
 
 4. 对同一组测试执行修改前后验证：
 
