@@ -55,7 +55,9 @@ def run_minimax(task: str, context: dict[str, Any], output: Path, target: Path |
         text = choices[0].get("message", {}).get("content", "") if choices else ""
     else:
         text = "\n".join(block["text"] for block in body.get("content", []) if block.get("type") == "text")
-    before = target.read_bytes() if target is not None else None
+    before = None
+    if target is not None:
+        before = target.read_bytes() if target.exists() else b""
     generated = extract_python_source(text) if target is not None else None
     record = {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),

@@ -1,0 +1,27 @@
+{
+  "timestamp_utc": "2026-11-12T09:46:24.463960+00:00",
+  "provider": "MiniMax openai-compatible API",
+  "base_url": "https://api.minimax.chat/v1",
+  "model": "MiniMax-M3.1-Flash",
+  "task": "Add an optional min_rating filter to filter_places. Reject ratings outside 0..5. Keep category and max_distance behavior and preserve input order.",
+  "context_sha256": "9864a79818987828fa55d416ee2403bbe28f4ba5e7f9f4872e74a7e96122f8c0",
+  "request_id": "0744bdedc20030d88ca53240a269cd5c",
+  "usage": {
+    "total_tokens": 1870,
+    "total_characters": 0,
+    "prompt_tokens": 1406,
+    "completion_tokens": 464,
+    "completion_tokens_details": {
+      "reasoning_tokens": 226
+    },
+    "prompt_tokens_details": {
+      "cached_tokens": 1280
+    }
+  },
+  "response": "```python\nfrom __future__ import annotations\n\nfrom typing import TypedDict\n\n\nclass Place(TypedDict):\n    name: str\n    category: str\n    distance_m: int\n    rating: float\n\n\ndef filter_places(\n    places: list[Place],\n    *,\n    category: str | None = None,\n    max_distance_m: int | None = None,\n    min_rating: float | None = None,\n) -> list[Place]:\n    \"\"\"Return matching places without reordering the caller's list.\"\"\"\n    if max_distance_m is not None and max_distance_m < 0:\n        raise ValueError(\"max_distance_m must be non-negative\")\n    if min_rating is not None and (min_rating < 0 or min_rating > 5):\n        raise ValueError(\"min_rating must be between 0 and 5\")\n    return [\n        place\n        for place in places\n        if (category is None or place[\"category\"] == category)\n        and (max_distance_m is None or place[\"distance_m\"] <= max_distance_m)\n        and (min_rating is None or place[\"rating\"] >= min_rating)\n    ]\n```",
+  "applied_change": {
+    "target": ".runtime/minimax_live_catalog.py",
+    "before_sha256": "ff1559fbca317e7dfb70b7539402c5441f601b58b976df88d0b4fc3cfb01a002",
+    "after_sha256": "240baac07e1d1e2df95afabc161716009c7f194cbbd26b5d70096469311f4e16"
+  }
+}

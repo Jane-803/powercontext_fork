@@ -9,6 +9,7 @@ from sdd_context.embedding import DIMENSION, embed
 
 class FakeCollection:
     def __init__(self) -> None:
+        self.dimension = DIMENSION
         self.upsert_call = None
         self.query_call = None
 
@@ -91,7 +92,7 @@ def test_embedded_store_does_not_recreate_existing_database(monkeypatch, tmp_pat
             pass
 
         def get_or_create_collection(self, name, **kwargs):
-            return object()
+            return SimpleNamespace(dimension=DIMENSION)
 
     class HNSWConfiguration:
         def __init__(self, *, dimension):
@@ -105,6 +106,76 @@ def test_embedded_store_does_not_recreate_existing_database(monkeypatch, tmp_pat
     )
     SeekDBStore(tmp_path / "seekdb")
     assert events == []
+
+
+def test_store_rejects_an_existing_collection_with_wrong_dimension(monkeypatch, tmp_path: Path) -> None:
+    class Admin:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def list_databases(self):
+            return [SimpleNamespace(name="sdd_context")]
+
+    class Client:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def get_or_create_collection(self, name, **kwargs):
+            return SimpleNamespace(dimension=384)
+
+    class HNSWConfiguration:
+        def __init__(self, *, dimension):
+            self.dimension = dimension
+
+    monkeypatch.delenv("SEEKDB_HOST", raising=False)
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "pyseekdb",
+        SimpleNamespace(AdminClient=Admin, Client=Client, HNSWConfiguration=HNSWConfiguration),
+    )
+
+    try:
+        SeekDBStore(tmp_path / "seekdb")
+    except ValueError as exc:
+        assert "dimension 384" in str(exc)
+        assert f"requires {DIMENSION}" in str(exc)
+    else:
+        raise AssertionError("an incompatible existing collection must be rejected")
+
+
+def test_server_store_uses_configured_database_and_same_vector_dimension(monkeypatch, tmp_path: Path) -> None:
+    events = []
+    collection = FakeCollection()
+
+    def admin_client(**kwargs):
+        raise AssertionError("server mode must not manage databases")
+
+    class Client:
+        def __init__(self, **kwargs) -> None:
+            events.append(("client", kwargs))
+
+        def get_or_create_collection(self, name, **kwargs):
+            events.append(("collection", name, kwargs))
+            return collection
+
+    class HNSWConfiguration:
+        def __init__(self, *, dimension):
+            self.dimension = dimension
+
+    monkeypatch.setenv("SEEKDB_HOST", "db.example")
+    monkeypatch.setenv("SEEKDB_DATABASE", "engineering")
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "pyseekdb",
+        SimpleNamespace(AdminClient=admin_client, Client=Client, HNSWConfiguration=HNSWConfiguration),
+    )
+
+    SeekDBStore(tmp_path / "unused")
+
+    assert events[0][1]["host"] == "db.example"
+    assert events[0][1]["database"] == "engineering"
+    assert events[1][2]["configuration"].dimension == DIMENSION
+    assert events[1][2]["embedding_function"] is None
 
 
 def test_query_retries_lazy_hnsw_empty_reads_for_nonempty_collection() -> None:

@@ -41,6 +41,11 @@ class SeekDBStore:
             configuration=pyseekdb.HNSWConfiguration(dimension=DIMENSION),
             embedding_function=None,
         )
+        if self._collection.dimension != DIMENSION:
+            raise ValueError(
+                f"Collection {collection_name!r} has vector dimension {self._collection.dimension}; "
+                f"this application requires {DIMENSION}. Delete the incompatible collection and ingest again."
+            )
 
     def upsert(self, records: list[dict[str, Any]]) -> None:
         if not records:

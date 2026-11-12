@@ -60,6 +60,19 @@ def test_openai_compatible_response_is_supported(tmp_path: Path, monkeypatch: py
     assert record["request_id"] == "req-openai-1"
 
 
+def test_run_minimax_can_create_a_new_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MINIMAX_API_KEY", "test-only")
+    monkeypatch.setenv("MINIMAX_API_FORMAT", "anthropic")
+    monkeypatch.setenv("MINIMAX_BASE_URL", "https://example.test/anthropic")
+    monkeypatch.setattr("sdd_context.minimax_agent.httpx.post", lambda *args, **kwargs: FakeResponse())
+    target = tmp_path / "generated" / "catalog.py"
+
+    record = run_minimax("create module", {"sources": {}}, tmp_path / "record.json", target)
+
+    assert target.read_text(encoding="utf-8") == "VALUE = 2\n"
+    assert record["applied_change"]["before_sha256"] != record["applied_change"]["after_sha256"]
+
+
 def test_invalid_response_does_not_replace_target(tmp_path: Path) -> None:
     target = tmp_path / "catalog.py"
     target.write_text("VALUE = 1\n", encoding="utf-8")
