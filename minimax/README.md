@@ -10,7 +10,7 @@
 - PowerContext 1.2.0
 - pyseekdb 1.4.0.post1
 - MiniMax OpenAI-compatible API，默认 `MiniMax-M3.1-Flash`；也保留 Anthropic-compatible 配置
-- Linux/macOS 可直接使用嵌入式 seekdb；Windows 使用 `SEEKDB_*` 连接 seekdb Server
+- Linux/macOS 可直接使用嵌入式 seekdb；首次运行会创建 `sdd_context` 数据库。Windows 使用 `SEEKDB_*` 连接 seekdb Server
 
 ```bash
 cd minimax
@@ -20,7 +20,7 @@ pip install -e '.[test]'
 cp .env.example .env                 # 填入 MiniMax Key；不要提交
 ```
 
-Windows 激活命令为 `.venv\Scripts\Activate.ps1`。Windows 不使用嵌入式 pyseekdb，请按 `.env.example` 配置 seekdb Server。
+Windows 激活命令为 `.venv\Scripts\Activate.ps1`。Windows 不使用嵌入式 pyseekdb，请按 `.env.example` 配置 seekdb Server，并预先创建/选择该配置中的数据库。集合使用显式 96 维 HNSW 配置，且关闭 pyseekdb 默认 ONNX embedding；向量由项目本地 `embed()` 生成。若此前创建过默认 384 维的 `engineering_context` 集合，请删除该旧集合后重新运行 `ingest`，不要复用不兼容的旧向量索引。
 
 ## 一次完整验收
 

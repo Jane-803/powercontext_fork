@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from .embedding import embed
+from .embedding import DIMENSION, embed
 
 
 class SeekDBStore:
@@ -29,9 +29,16 @@ class SeekDBStore:
             )
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
+            admin = pyseekdb.AdminClient(path=str(path))
+            if not any(database.name == "sdd_context" for database in admin.list_databases()):
+                admin.create_database("sdd_context")
             client = pyseekdb.Client(path=str(path), database="sdd_context")
         self._client = client
-        self._collection = client.get_or_create_collection(collection_name)
+        self._collection = client.get_or_create_collection(
+            collection_name,
+            configuration=pyseekdb.HNSWConfiguration(dimension=DIMENSION),
+            embedding_function=None,
+        )
 
     def upsert(self, records: list[dict[str, Any]]) -> None:
         if not records:
