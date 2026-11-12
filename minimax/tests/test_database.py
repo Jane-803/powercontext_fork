@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from sdd_context.database import SeekDBStore
+from sdd_context.database import MAX_VECTOR_QUERY_ATTEMPTS, SeekDBStore
 from sdd_context.embedding import DIMENSION, embed
 
 
@@ -105,3 +105,47 @@ def test_embedded_store_does_not_recreate_existing_database(monkeypatch, tmp_pat
     )
     SeekDBStore(tmp_path / "seekdb")
     assert events == []
+
+
+def test_query_retries_lazy_hnsw_empty_reads_for_nonempty_collection() -> None:
+    collection = FakeCollection()
+    collection.count = lambda: 1
+    calls = 0
+
+    def query(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls < MAX_VECTOR_QUERY_ATTEMPTS:
+            return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
+        return {
+            "ids": [["r1"]],
+            "documents": [["alpha"]],
+            "metadatas": [[{"kind": "spec"}]],
+            "distances": [[0.0]],
+        }
+
+    collection.query = query
+    store = object.__new__(SeekDBStore)
+    store._collection = collection
+
+    assert store.query("alpha") == [
+        {"record_id": "r1", "content": "alpha", "metadata": {"kind": "spec"}, "distance": 0.0}
+    ]
+    assert calls == MAX_VECTOR_QUERY_ATTEMPTS
+
+
+def test_query_does_not_retry_an_empty_collection() -> None:
+    collection = FakeCollection()
+    calls = 0
+
+    def query(**kwargs):
+        nonlocal calls
+        calls += 1
+        return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
+
+    collection.query = query
+    store = object.__new__(SeekDBStore)
+    store._collection = collection
+
+    assert store.query("alpha") == []
+    assert calls == 1

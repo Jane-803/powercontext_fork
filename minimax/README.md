@@ -20,7 +20,7 @@ pip install -e '.[test]'
 cp .env.example .env                 # 填入 MiniMax Key；不要提交
 ```
 
-Windows 激活命令为 `.venv\Scripts\Activate.ps1`。Windows 不使用嵌入式 pyseekdb，请按 `.env.example` 配置 seekdb Server，并预先创建/选择该配置中的数据库。集合使用显式 96 维 HNSW 配置，且关闭 pyseekdb 默认 ONNX embedding；向量由项目本地 `embed()` 生成。若此前创建过默认 384 维的 `engineering_context` 集合，请删除该旧集合后重新运行 `ingest`，不要复用不兼容的旧向量索引。
+Windows 激活命令为 `.venv\Scripts\Activate.ps1`。Windows 不使用嵌入式 pyseekdb，请按 `.env.example` 配置 seekdb Server，并预先创建/选择该配置中的数据库。集合使用显式 96 维 HNSW 配置，且关闭 pyseekdb 默认 ONNX embedding；向量由项目本地 `embed()` 生成。pyseekdb 1.4.0.post1 的嵌入式 HNSW 索引在新进程中可能惰性初始化，因此适配层会在“集合非空但查询为空”时有限重试，避免首次检索漏掉已持久化记录。若此前创建过默认 384 维的 `engineering_context` 集合，请删除该旧集合后重新运行 `ingest`，不要复用不兼容的旧向量索引。
 
 ## 一次完整验收
 

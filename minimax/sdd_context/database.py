@@ -6,6 +6,8 @@ from typing import Any
 
 from .embedding import DIMENSION, embed
 
+MAX_VECTOR_QUERY_ATTEMPTS = 4
+
 
 class SeekDBStore:
     """Thin adapter that keeps all engineering material and retrieval in seekdb."""
@@ -51,12 +53,18 @@ class SeekDBStore:
         )
 
     def query(self, task: str, limit: int = 20) -> list[dict[str, Any]]:
-        result = self._collection.query(
-            query_embeddings=embed(task),
-            n_results=limit,
-            include=["documents", "metadatas", "distances"],
-        )
-        ids = (result.get("ids") or [[]])[0]
+        if limit <= 0:
+            return []
+        query_embedding = embed(task)
+        for attempt in range(MAX_VECTOR_QUERY_ATTEMPTS):
+            result = self._collection.query(
+                query_embeddings=query_embedding,
+                n_results=limit,
+                include=["documents", "metadatas", "distances"],
+            )
+            ids = (result.get("ids") or [[]])[0]
+            if ids or attempt == MAX_VECTOR_QUERY_ATTEMPTS - 1 or self._collection.count() == 0:
+                break
         documents = (result.get("documents") or [[]])[0]
         metadatas = (result.get("metadatas") or [[]])[0]
         distances = (result.get("distances") or [[]])[0]
